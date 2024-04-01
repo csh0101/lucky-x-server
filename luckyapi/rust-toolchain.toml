@@ -1,0 +1,4 @@
+## 这个就是toolchain的定义 所以这个要升级到1.77.0
+[toolchain]
+channel = "1.77.0"
+profile = "default"

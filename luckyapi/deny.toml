@@ -1,0 +1,46 @@
+# [advisories] 部分定义了如何处理安全顾问通知的策略
+[advisories]
+version = 2
+# 如果依赖被撤回（yanked），发出警告
+yanked = "warn"
+
+# 可以指定要忽略的安全顾问ID。被忽略的安全顾问ID在遇到时仍会输出通知
+ignore = [
+    # 示例：忽略具体的安全顾问ID
+    # "RUSTSEC-0000-0000",
+]
+
+# [licenses] 部分定义了关于crate许可证的处理策略
+[licenses]
+# 如果crate没有检测到许可证，将被拒绝使用
+# 明确列出允许使用的许可证
+allow = [
+    "Apache-2.0 WITH LLVM-exception",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "MIT-0",
+    "MIT",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+# 设置许可证检测的置信度阈值，只有当许可证检测的置信度高于此值时，认为是有效的
+confidence-threshold = 0.8
+
+# [bans] 部分定义了对于使用多个版本的crate和通配符依赖的处理策略
+[bans]
+# 允许一个项目中存在多个版本的相同crate
+multiple-versions = "allow"
+# 对于使用通配符指定版本的依赖发出警告
+wildcards = "warn"
+
+# [sources] 部分定义了对于来源于未知注册表和git仓库的crate的处理策略
+[sources]
+# 对于来源于未知注册表的crate发出警告
+unknown-registry = "warn"
+# 对于来源于未知git仓库的crate发出警告
+unknown-git = "warn"
+# 列出允许的crate注册表地址，这里指定了Rust官方的crates.io索引
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# 列出允许的git仓库地址，此处为空，表示不特别允许任何git仓库
+allow-git = []
