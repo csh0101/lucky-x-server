@@ -1,0 +1,33 @@
+[package]
+name = "luckylib"
+version = "0.1.0"
+edition = "2021"
+license = "MIT-0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+log-debug = []
+log-trace = []
+
+[dependencies]
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.14", features = [
+    "env-filter",
+    "fmt",
+    "registry",
+] }
+tracing-log = { version = "0.2.0" }
+time = "0.3.34"
+tokio = { version = "1.36.0", features = ["full", "tracing"] }
+console-subscriber = "0.2.0"
+# Implements the types defined in the Otel spec
+opentelemetry = "0.22.0"
+# Integration between the tracing crate and the opentelemetry crate
+tracing-opentelemetry = "0.23.0"
+# Allows you to export data to Jaeger
+opentelemetry-jaeger = "0.21.0"
+opentelemetry-jaeger-propagator = "0.1.0"
+opentelemetry_sdk = { version = "0.22.1", features = ["async-std"] }
+opentelemetry-otlp = { version = "0.15.0", features = ["grpc-tonic"] }
