@@ -4,6 +4,7 @@ use md5;
 use regex;
 use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 use std::str;
 use std::{
     env,
@@ -148,6 +149,66 @@ fn get_dir(sm: &str) -> String {
     }
 
     dir
+}
+//
+pub async fn walk_dir(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+    let mut dirs = vec![dir];
+    let mut files = vec![];
+
+    while !dirs.is_empty() {
+        let mut dir_iter = tokio::fs::read_dir(dirs.remove(0)).await?;
+
+        while let Some(entry) = dir_iter.next_entry().await? {
+            let entry_path_buf = entry.path();
+
+            if entry_path_buf.is_dir() {
+                dirs.push(entry_path_buf);
+            } else {
+                files.push(entry_path_buf);
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+pub fn walk_dir_sync(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+    let mut dirs = vec![dir];
+    let mut files = vec![];
+
+    while !dirs.is_empty() {
+        // 使用 std::fs::read_dir 替代 tokio::fs::read_dir
+        let dir = dirs.remove(0);
+        let dir_iter = fs::read_dir(dir)?;
+
+        for entry in dir_iter {
+            let entry = entry?;
+            let entry_path = entry.path();
+
+            if entry_path.is_dir() {
+                dirs.push(entry_path);
+            } else {
+                files.push(entry_path);
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+pub fn walkdir_sync_v2(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = vec![];
+
+    for entry in WalkDir::new(dir) {
+        let entry = entry?;
+        let path = entry.path().to_path_buf();
+
+        if path.is_file() {
+            files.push(path);
+        }
+    }
+
+    Ok(files)
 }
 
 mod test {

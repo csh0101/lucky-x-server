@@ -11,6 +11,9 @@ description = "a good server named x"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dev-dependencies]
+criterion = { version = "0.4.0", features = ["async_futures", "async_tokio"] }
+tokio = { version = "1.36.0", features = ["full", "tracing"] }
 [dependencies]
 axum = { version = "0.7.5", features = ["macros"] }
 axum-macros = "0.4.1"
@@ -32,3 +35,7 @@ md5 = "0.7.0"
 
 [build-dependencies]
 shadow-rs = { version = "0.27.1" }
+
+[[bench]]
+name = "benchmark"
+harness = false
