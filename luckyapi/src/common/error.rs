@@ -1,3 +1,4 @@
+use aliyun_oss_rust_sdk::{error::OssError, oss::OSS};
 use axum::{
     extract::rejection::JsonRejection, http::StatusCode, response::IntoResponse,
 };
@@ -60,6 +61,18 @@ impl From<zip::result::ZipError> for AppError {
 
 impl From<std::path::StripPrefixError> for AppError {
     fn from(err: std::path::StripPrefixError) -> Self {
+        AppError::Other(anyhow::Error::new(err))
+    }
+}
+
+impl From<tokio::task::JoinError> for AppError {
+    fn from(err: tokio::task::JoinError) -> Self {
+        AppError::Other(anyhow::Error::new(err))
+    }
+}
+
+impl From<OssError> for AppError {
+    fn from(err: OssError) -> Self {
         AppError::Other(anyhow::Error::new(err))
     }
 }

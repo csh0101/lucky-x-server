@@ -7,5 +7,6 @@ pub mod common;
 pub mod error;
 pub mod handlers;
 
+pub mod util;
 pub use handlers::health_handler::health_check_handler;
 pub use handlers::zip_handler::zipfile_bundle;

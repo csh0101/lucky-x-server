@@ -10,25 +10,61 @@ use std::{
     env,
     fs::{self, File},
 };
+use tokio::io::AsyncReadExt;
+use tokio::sync::OwnedMutexGuard;
+use tokio::task;
+use tokio_util::compat::Compat;
+use tracing::field;
+use tracing::instrument::WithSubscriber;
 use tracing::{debug, info};
 use zip::write::FileOptions;
 
+use crate::common::error::AppError;
+use crate::common::response::{build_success_response, AppJson, RespResult};
+use anyhow::{anyhow, bail};
+use async_zip::{Compression, ZipEntryBuilder};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 use zip::{self, ZipWriter};
 
-use crate::common::error::AppError;
-use crate::common::response::{build_success_response, AppJson, RespResult};
+use crate::util::get_oss_instance;
+use aliyun_oss_rust_sdk::oss::OSS;
+use aliyun_oss_rust_sdk::request::RequestBuilder;
 
 #[debug_handler]
 pub async fn zipfile_bundle(
-    AppJson(params): AppJson<FileBundle>,
+    AppJson(file_bundle): AppJson<FileBundle>,
 ) -> Result<AppJson<RespResult<ZipFileBundleResult>>, AppError> {
-    let output_name = build_zip(params)?;
-    Ok(AppJson(build_success_response(ZipFileBundleResult {
-        oss_url: output_name,
-    })))
+    #[cfg(feature = "async_zipfile_bundle")]
+    {
+        async_build_zip(file_bundle).await
+    }
+
+    let dir = get_dir(&file_bundle.filename);
+
+    let oss_full_filepath = format!("{}/{}", dir, &file_bundle.filename);
+
+    let output_name = std_zipfile_bundle(file_bundle).await?;
+
+    let oss = get_oss_instance().await;
+
+    let builder = RequestBuilder::new();
+
+    oss.put_object_from_file(output_name, oss_full_filepath, builder).await?;
+
+    let resp = ZipFileBundleResult { success: true };
+    Ok(AppJson(build_success_response(resp)))
 }
+
+async fn std_zipfile_bundle(
+    file_bundle: FileBundle,
+) -> Result<String, AppError> {
+    let output_name =
+        task::spawn_blocking(move || build_zip(file_bundle)).await??;
+
+    Ok(output_name)
+}
+
 #[derive(Deserialize, Debug)]
 pub struct FileBundle {
     pub path: String,
@@ -39,7 +75,74 @@ pub struct FileBundle {
 
 #[derive(Serialize, Deserialize)]
 pub struct ZipFileBundleResult {
-    oss_url: String,
+    success: bool,
+}
+
+pub async fn async_build_zip(
+    bundle: FileBundle,
+) -> anyhow::Result<String, AppError> {
+    let output_name = {
+        if let Some(key) = bundle.key {
+            output_name(&bundle.filename, &key)
+        } else {
+            output_name(&bundle.filename, "")
+        }
+    }?;
+
+    let archive_file_path = Path::new("./tmp")
+        .join("zipfile")
+        .join(format!("{}.zip", &output_name));
+
+    delete_file_if_exists(&archive_file_path)?;
+
+    let mut archive_file = tokio::fs::File::create(&archive_file_path).await?;
+
+    let mut zip_writer =
+        async_zip::tokio::write::ZipFileWriter::with_tokio(&mut archive_file);
+
+    for filepath in filepaths(&bundle.path) {
+        let filepath: PathBuf = Path::new(&filepath).into();
+        let entries = async_walk_dir(filepath.clone()).await?;
+        let input_dir_str = filepath
+            .as_os_str()
+            .to_str()
+            .ok_or(anyhow!("Input path not valid UTF-8."))?;
+
+        for entry_path_buf in entries {
+            let entry_path = entry_path_buf.as_path();
+            let entry_str = entry_path
+                .as_os_str()
+                .to_str()
+                .ok_or(anyhow!("Directory file path not valid UTF-8."))?;
+
+            if !entry_str.starts_with(input_dir_str) {
+                return Err(AppError::Other(anyhow!("Directory file path does not start with base input directory path.")));
+            }
+            let entry_str = &entry_str[input_dir_str.len() + 1..];
+            write_entry(entry_str, entry_path, &mut zip_writer).await?;
+        }
+    }
+
+    Ok(output_name)
+}
+
+async fn write_entry(
+    filename: &str,
+    input_path: &Path,
+    writer: &mut async_zip::tokio::write::ZipFileWriter<&mut tokio::fs::File>,
+) -> anyhow::Result<()> {
+    let mut input_file = tokio::fs::File::open(input_path).await?;
+    let input_file_size = input_file.metadata().await?.len() as usize;
+
+    let mut buffer = Vec::with_capacity(input_file_size);
+    input_file.read_to_end(&mut buffer).await?;
+
+    let builder = ZipEntryBuilder::new(filename.into(), Compression::Deflate);
+    // todo 流式写入的方式貌似不太work,局部文件头无效
+    // writer.write_entry_stream(builder).await?;
+    writer.write_entry_whole(builder, &buffer).await?;
+
+    Ok(())
 }
 
 pub fn build_zip(bundle: FileBundle) -> anyhow::Result<String, AppError> {
@@ -151,7 +254,7 @@ fn get_dir(sm: &str) -> String {
     dir
 }
 //
-pub async fn walk_dir(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+pub async fn async_walk_dir(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
     let mut dirs = vec![dir];
     let mut files = vec![];
 

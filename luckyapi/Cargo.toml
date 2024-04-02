@@ -32,7 +32,10 @@ walkdir = "2.3"
 html-escape = "0.2.13"
 regex = "1"
 md5 = "0.7.0"
-
+async_zip = { version = "0.0.16", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+aliyun-oss-rust-sdk = { version = "0.2.1", features = ["debug-print"] }
+lazy_static = "1.4.0"
 [build-dependencies]
 shadow-rs = { version = "0.27.1" }
 
