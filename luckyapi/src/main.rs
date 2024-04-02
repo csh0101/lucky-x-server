@@ -6,6 +6,7 @@ use luckyapi::{handlers::zip_handler::FileBundle, *};
 use luckylib::tracing_config::setup_tracing;
 use axum::{routing::{get, post}, Router};
 use tokio::runtime::Builder;
+use tracing::error;
 
 // use lucky_x_api::error::storage_error::StorageError;
 
@@ -33,6 +34,12 @@ enum Commands {
         port: String,
     },
     AdHoc,
+    Copy{
+        #[arg(short,long)]
+        from_dir :String,
+        #[arg(short,long)]
+        to_dir:String
+    }
 }
 
 
@@ -41,6 +48,7 @@ fn main() -> Result<()> {
     let runtime = Builder::new_multi_thread()
         .worker_threads(4) // 设置工作线程数量为4
         .max_blocking_threads(32) // 设置最大阻塞线程数为32
+        .enable_all()
         .build()
         .unwrap();
 
@@ -53,6 +61,12 @@ fn main() -> Result<()> {
 async fn app_init() -> Result<()>{
 
 
+
+    #[cfg(feature="async")]
+    println!("async");
+
+    #[cfg(not(feature="async"))]
+    println!("not async");
     //初始化tracing的问题
     setup_tracing();
     // let m = Command::new("cmd").author(crate_authors!("\n")).get_matches();
@@ -67,6 +81,12 @@ async fn app_init() -> Result<()>{
             println!("output dir {}",x);
             Ok(())
         },
+        Commands::Copy { from_dir, to_dir } =>  {
+             let count  = crate::parallel_copy(&from_dir, &to_dir).await? ;
+             println!("copy content count: {}",count);
+             Ok(())
+        }
+        ,
     }
 
 }
@@ -93,7 +113,7 @@ async fn register_router(port: String) -> Result<()> {
     Ok(())
 }
 
-#[warn(dead_code)]
+#[allow(dead_code)]
 async fn launch(port: String) -> Result<()> {
     println!("{}", port);
     tracing::info!("csh0101");

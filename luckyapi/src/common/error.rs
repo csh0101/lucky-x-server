@@ -2,6 +2,7 @@ use aliyun_oss_rust_sdk::{error::OssError, oss::OSS};
 use axum::{
     extract::rejection::JsonRejection, http::StatusCode, response::IntoResponse,
 };
+use fs_extra::error::Error;
 use thiserror::Error;
 
 use crate::common::response::AppJson;
@@ -73,6 +74,12 @@ impl From<tokio::task::JoinError> for AppError {
 
 impl From<OssError> for AppError {
     fn from(err: OssError) -> Self {
+        AppError::Other(anyhow::Error::new(err))
+    }
+}
+
+impl From<fs_extra::error::Error> for AppError {
+    fn from(err: fs_extra::error::Error) -> Self {
         AppError::Other(anyhow::Error::new(err))
     }
 }

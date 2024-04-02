@@ -38,6 +38,7 @@
                     "kind": "bin"
                 }
             },
+            "preLaunchTask": "rust: cargo build",
             "args": ["launch-x-server","--port","8080"],
             "cwd": "${workspaceFolder}"
         },

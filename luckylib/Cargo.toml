@@ -7,10 +7,7 @@ license = "MIT-0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = []
-log-debug = []
-log-trace = []
-
+async = []
 [dependencies]
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.14", features = [

@@ -1,59 +1,61 @@
-use axum::{debug_handler, Json};
-use core::arch;
+use crate::common::error::AppError;
+use crate::common::response::{build_success_response, AppJson, RespResult};
+use anyhow::anyhow;
+use async_zip::{Compression, ZipEntryBuilder};
+use axum::debug_handler;
+use fs_extra::dir::*;
 use md5;
 use regex;
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File};
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str;
-use std::{
-    env,
-    fs::{self, File},
-};
 use tokio::io::AsyncReadExt;
-use tokio::sync::OwnedMutexGuard;
 use tokio::task;
-use tokio_util::compat::Compat;
-use tracing::field;
-use tracing::instrument::WithSubscriber;
-use tracing::{debug, info};
-use zip::write::FileOptions;
-
-use crate::common::error::AppError;
-use crate::common::response::{build_success_response, AppJson, RespResult};
-use anyhow::{anyhow, bail};
-use async_zip::{Compression, ZipEntryBuilder};
-use serde::{Deserialize, Serialize};
+use tracing::field::debug;
 use walkdir::WalkDir;
+use zip::write::FileOptions;
 use zip::{self, ZipWriter};
 
 use crate::util::get_oss_instance;
-use aliyun_oss_rust_sdk::oss::OSS;
 use aliyun_oss_rust_sdk::request::RequestBuilder;
 
 #[debug_handler]
 pub async fn zipfile_bundle(
     AppJson(file_bundle): AppJson<FileBundle>,
 ) -> Result<AppJson<RespResult<ZipFileBundleResult>>, AppError> {
-    #[cfg(feature = "async_zipfile_bundle")]
+    let output_name;
+    #[cfg(feature = "async")]
     {
-        async_build_zip(file_bundle).await
+        output_name = async_build_zip(file_bundle.clone()).await?;
     }
 
-    let dir = get_dir(&file_bundle.filename);
+    #[cfg(not(feature = "async"))]
+    {
+        output_name = std_zipfile_bundle(file_bundle.clone()).await?;
+    }
 
-    let oss_full_filepath = format!("{}/{}", dir, &file_bundle.filename);
+    upload(&file_bundle.filename, output_name).await?;
 
-    let output_name = std_zipfile_bundle(file_bundle).await?;
+    let resp = ZipFileBundleResult { success: true };
+
+    Ok(AppJson(build_success_response(resp)))
+}
+
+async fn upload(filename: &str, output_name: String) -> anyhow::Result<()> {
+    let dir = get_dir(&filename);
+
+    let oss_full_filepath = format!("{}/{}", dir, &filename);
 
     let oss = get_oss_instance().await;
 
     let builder = RequestBuilder::new();
 
-    oss.put_object_from_file(output_name, oss_full_filepath, builder).await?;
-
-    let resp = ZipFileBundleResult { success: true };
-    Ok(AppJson(build_success_response(resp)))
+    Ok(oss
+        .put_object_from_file(output_name, oss_full_filepath, builder)
+        .await?)
 }
 
 async fn std_zipfile_bundle(
@@ -65,7 +67,7 @@ async fn std_zipfile_bundle(
     Ok(output_name)
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct FileBundle {
     pub path: String,
     pub deltarget: Option<u8>,
@@ -83,9 +85,9 @@ pub async fn async_build_zip(
 ) -> anyhow::Result<String, AppError> {
     let output_name = {
         if let Some(key) = bundle.key {
-            output_name(&bundle.filename, &key)
+            output_filename(&bundle.filename, &key)
         } else {
-            output_name(&bundle.filename, "")
+            output_filename(&bundle.filename, "")
         }
     }?;
 
@@ -102,6 +104,16 @@ pub async fn async_build_zip(
 
     for filepath in filepaths(&bundle.path) {
         let filepath: PathBuf = Path::new(&filepath).into();
+        let local_file_path =
+            Path::new("./tmp").join("zipfile").join(&filepath);
+
+        create_dir_all_if_not_exist(&local_file_path)?;
+
+        fs_extra::dir::copy(&filepath, &local_file_path, &CopyOptions::new())?;
+
+        //
+        let filepath = local_file_path;
+
         let entries = async_walk_dir(filepath.clone()).await?;
         let input_dir_str = filepath
             .as_os_str()
@@ -152,9 +164,9 @@ pub fn build_zip(bundle: FileBundle) -> anyhow::Result<String, AppError> {
 
     let output_name = {
         if let Some(key) = bundle.key {
-            output_name(&bundle.filename, &key)
+            output_filename(&bundle.filename, &key)
         } else {
-            output_name(&bundle.filename, "")
+            output_filename(&bundle.filename, "")
         }
     }?;
 
@@ -201,7 +213,7 @@ pub fn build_zip(bundle: FileBundle) -> anyhow::Result<String, AppError> {
 }
 
 // todo 这里铁报错
-fn output_name(filename: &str, key: &str) -> anyhow::Result<String> {
+fn output_filename(filename: &str, key: &str) -> anyhow::Result<String> {
     let name = if filename.is_empty() { key } else { filename };
     let mut output_name = String::new();
     let _ = html_escape::decode_html_entities_to_string(name, &mut output_name);
@@ -219,14 +231,20 @@ fn filepaths(path: &str) -> Vec<String> {
     return gjson::parse(path)
         .array()
         .iter()
-        .map(|ele| ele.to_string())
+        .map(|ele| ele.get("filepath").to_string())
         .collect();
 }
-
 fn delete_file_if_exists(path: &Path) -> anyhow::Result<()> {
     if path.exists() {
         // 如果文件存在，则尝试删除
         fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn create_dir_all_if_not_exist(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        fs::create_dir_all(path)?;
     }
     Ok(())
 }
@@ -317,7 +335,7 @@ pub fn walkdir_sync_v2(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
 mod test {
 
     use super::get_dir;
-    use super::output_name;
+    use super::output_filename;
     use super::FileBundle;
 
     #[test]
@@ -333,7 +351,7 @@ mod test {
     #[test]
     fn test_output_name() {
         let input_file_name = "/tmp/pictures/x.y";
-        let output_name = output_name(&input_file_name, "").unwrap();
+        let output_name = output_filename(&input_file_name, "").unwrap();
         println!("output_name : {}", output_name);
         assert_eq!("tmppicturesxy", output_name)
     }

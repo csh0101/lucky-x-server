@@ -102,7 +102,7 @@ pub fn build_success_response<T>(data: T) -> RespResult<T> {
     RespResult::Success(Success {
         code: 200,
         message: "Operation successful".to_string(),
-        data: data,
+        data,
     })
 }
 

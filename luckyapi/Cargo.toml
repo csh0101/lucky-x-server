@@ -7,9 +7,11 @@ authors = ["csh0101csh0101@proton.me"]
 license = "MIT-0"
 build = "build.rs"
 description = "a good server named x"
-
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+async = ["default"]
 
 [dev-dependencies]
 criterion = { version = "0.4.0", features = ["async_futures", "async_tokio"] }
@@ -36,6 +38,7 @@ async_zip = { version = "0.0.16", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 aliyun-oss-rust-sdk = { version = "0.2.1", features = ["debug-print"] }
 lazy_static = "1.4.0"
+fs_extra = "1.3.0"
 [build-dependencies]
 shadow-rs = { version = "0.27.1" }
 
