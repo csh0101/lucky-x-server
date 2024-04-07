@@ -1,0 +1,66 @@
+extensions:
+  zpages:
+    endpoint: localhost:55679
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+      http:
+        endpoint: localhost:4318
+  hostmetrics:
+    scrapers:
+      cpu:
+      disk:
+      filesystem:
+      load:
+      memory:
+      network:
+      paging:
+
+processors:
+  resourcedetection:
+    detectors: [env, system]
+  cumulativetodelta:
+  batch:
+  memory_limiter:
+    # 75% of maximum memory up to 2G
+    limit_mib: 1536
+    # 25% of limit up to 2G
+    spike_limit_mib: 512
+    check_interval: 5s
+
+exporters:
+  debug:
+    verbosity: detailed
+  otlp/jaeger:
+    endpoint: localhost:4317
+  prometheus:
+    endpoint: localhost:8889
+    namespace: default
+  otlp/uptrace:
+    endpoint: https://otlp.uptrace.dev:4317
+    tls: { insecure: false }
+    headers:
+      uptrace-dsn: "https://2RZGMOGa7d_oz6un7_0kJg@api.uptrace.dev?grpc=4317"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, otlp/uptrace]
+    metrics:
+      receivers: [otlp]
+      processors: [cumulativetodelta, memory_limiter, batch]
+      exporters: [debug, otlp/uptrace]
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [cumulativetodelta, batch, resourcedetection]
+      exporters: [otlp/uptrace, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/uptrace, debug]
+  extensions: [zpages]

@@ -1,7 +1,8 @@
-pub mod tracing_config;
+pub mod oltp_config;
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }
+pub use oltp_config::OLTP_METER;
 
 #[cfg(test)]
 mod tests {

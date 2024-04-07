@@ -33,6 +33,15 @@ check:
 update:
 	@cargo update
 
+
+
+# 安装musl release版本
+build-musl:
+	@cargo build --target x86_64-unknown-linux-musl --release
+
+run-musl-async-server:
+	@cargo build --target x86_64-unknown-linux-musl --release
+	@./target/x86_64-unknown-linux-musl/release/luckyapi launch-x-server --port 8080
+
 # 伪目标 忽略这些名字的文件
 .PHONY: all build release run run-async clean check update
-

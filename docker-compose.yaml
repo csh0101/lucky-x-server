@@ -1,0 +1,26 @@
+version: "3.7"
+name: observe-day1
+services:
+  opentelemetry-collector:
+    ports:
+      - 4317:4317
+    image: otel/opentelemetry-collector-contrib:0.97.0
+    volumes:
+      - ./otel-collector-config-minimal.yaml:/etc/otelcol-contrib/config.yaml
+    networks:
+      - observe
+  # jaeger:
+  #   image: jaegertracing/all-in-one:${JAEGER_VERSION:-latest}
+  #   ports:
+  #     - "16686:16686"
+  #     - "4318:4318"
+  #   environment:
+  #     - LOG_LEVEL=debug
+  #   networks:
+  #     - observe
+  # prometheus:
+  #   ports:
+  #     - 9090:9090
+  #   image: prom/prometheus
+networks:
+  observe:
