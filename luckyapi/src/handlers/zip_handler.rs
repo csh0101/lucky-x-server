@@ -20,6 +20,7 @@ use tokio::io::AsyncReadExt;
 use tokio::task;
 use tokio_util::compat::Compat;
 use tracing::field::debug;
+use tracing::instrument;
 use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::{self, ZipWriter};
@@ -30,6 +31,7 @@ use aliyun_oss_rust_sdk::request::RequestBuilder;
 use std::sync::Arc;
 
 #[debug_handler]
+#[instrument(fields(custom_field = "zip archive"))]
 pub async fn zipfile_bundle(
     State(app_context): State<Arc<AppContext>>,
     AppJson(file_bundle): AppJson<FileBundle>,
@@ -57,6 +59,7 @@ pub async fn zipfile_bundle(
     Ok(AppJson(build_success_response(resp)))
 }
 
+#[instrument(fields(custom_field = "upload oss"))]
 async fn upload(
     app_context: Arc<AppContext>,
     filename: &str,
@@ -112,6 +115,7 @@ pub struct ZipFileBundleResult {
     success: bool,
 }
 
+#[instrument(fields(custom_field = "async build zip"))]
 pub async fn async_build_zip(
     app_context: Arc<AppContext>,
     bundle: FileBundle,
@@ -300,6 +304,7 @@ pub fn build_zip(bundle: FileBundle) -> anyhow::Result<String, AppError> {
 }
 
 // todo 这里铁报错
+#[instrument]
 fn output_filename(filename: &str, key: &str) -> anyhow::Result<String> {
     let name = if filename.is_empty() { key } else { filename };
     let mut output_name = String::new();
@@ -307,6 +312,7 @@ fn output_filename(filename: &str, key: &str) -> anyhow::Result<String> {
     return Ok(reg_replace(output_name));
 }
 
+#[instrument]
 fn reg_replace(output_name: String) -> String {
     let special_chars_pattern = regex::Regex::new(
         r"[`~!@#$^&*()=|{}\[\]:;',\\.<>/?~！@#￥……&*（）——|{}\[\]‘；：”“'。，、？%+\-_]",
@@ -321,6 +327,8 @@ fn filepaths(path: &str) -> Vec<String> {
         .map(|ele| ele.get("filepath").to_string())
         .collect();
 }
+
+#[instrument]
 fn delete_file_if_exists(path: &Path) -> anyhow::Result<()> {
     if path.exists() {
         // 如果文件存在，则尝试删除
@@ -329,6 +337,7 @@ fn delete_file_if_exists(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[instrument]
 fn create_dir_all_if_not_exist(path: &Path) -> anyhow::Result<()> {
     if !path.exists() {
         fs::create_dir_all(path)?;

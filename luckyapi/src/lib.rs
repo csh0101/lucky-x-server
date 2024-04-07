@@ -17,6 +17,7 @@ use opentelemetry::{
 };
 pub use util::parallel_copy;
 
+#[derive(Debug)]
 pub struct AppContext {
     metric_context: MetricContext,
 }
@@ -33,10 +34,12 @@ impl AppContext {
  * oss_upload_file represent the action that upload file to oss.
  */
 
+#[derive(Debug)]
 struct MetricContext {
     zip_archive_context: ZipArchiveMetricContext,
 }
 
+#[derive(Debug)]
 struct ZipArchiveMetricContext {
     file_req_access: Counter<u64>,
     file_copy_success: Counter<u64>,
