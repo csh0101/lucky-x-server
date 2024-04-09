@@ -83,3 +83,9 @@ impl From<fs_extra::error::Error> for AppError {
         AppError::Other(anyhow::Error::new(err))
     }
 }
+
+impl From<async_zip::error::ZipError> for AppError {
+    fn from(err: async_zip::error::ZipError) -> Self {
+        AppError::Other(anyhow::Error::new(err))
+    }
+}

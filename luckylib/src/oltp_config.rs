@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use opentelemetry::global::ObjectSafeTracerProvider;
 use opentelemetry::trace::get_active_span;
 use opentelemetry::trace::{Span, Tracer, TracerProvider as _};
-use opentelemetry::{global, metrics::MeterProvider, Key, KeyValue};
+use opentelemetry::{global, metrics::MeterProvider as _, Key, KeyValue};
 use opentelemetry_otlp::{ExportConfig, Protocol, WithExportConfig};
 use opentelemetry_prometheus::PrometheusExporter;
 use opentelemetry_sdk::trace::TracerProvider;
@@ -12,7 +12,7 @@ use opentelemetry_sdk::{
     export,
     metrics::{
         reader::{DefaultAggregationSelector, DefaultTemporalitySelector},
-        SdkMeterProvider,
+        PeriodicReader, SdkMeterProvider,
     },
     trace::{self, RandomIdGenerator, Sampler},
     Resource,
@@ -31,15 +31,39 @@ use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::Sub
 
 // pub static OLTP_TRACER: Lazy<opentelemetry_sdk::trace::Tracer> = Lazy::new(|| oltp_tracing_init());
 
-pub static OLTP_METER: Lazy<opentelemetry_sdk::metrics::SdkMeterProvider> =
-    Lazy::new(|| oltp_meter_init());
+pub static OLTP_METER: Lazy<opentelemetry_sdk::metrics::SdkMeterProvider> = Lazy::new(|| {
+    let provider = oltp_meter_init();
+    #[cfg(feature = "test")]
+    {
+        let provider = oltp_metrics_test();
+        return provider;
+    }
+
+    return provider;
+});
 
 // pub static Coutner  : Lazy<> = Lazy::new(|| OLTP_METER.meter())
-fn oltp_tracing_test() -> TracerProvider {
+fn oltp_tracing_test() -> opentelemetry_sdk::trace::Tracer {
     let exporter = opentelemetry_stdout::SpanExporter::default();
-    TracerProvider::builder()
+    let provider = TracerProvider::builder()
         .with_simple_exporter(exporter)
-        .build()
+        .build();
+    // global::set_tracer_provider(provider);
+
+    let tracer = provider.versioned_tracer(
+        "opentelemetry-otlp",
+        Some(env!("CARGO_PKG_VERSION")),
+        Some("https://opentelemetry.io/schemas/1.21.0"),
+        None,
+    );
+    tracer
+    // return global::tracer_provider().tracer("test_app");
+}
+
+fn oltp_metrics_test() -> opentelemetry_sdk::metrics::SdkMeterProvider {
+    let exporter = opentelemetry_stdout::MetricsExporter::default();
+    let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio).build();
+    SdkMeterProvider::builder().with_reader(reader).build()
 }
 
 pub fn oltp_tracing_init() -> opentelemetry_sdk::trace::Tracer {
@@ -106,6 +130,10 @@ pub fn setup_tracing() -> anyhow::Result<()> {
     // 定义opentelemetry的tracer
     // 定义opentelemetry的layer
 
+    #[cfg(feature = "test")]
+    let tracer = oltp_tracing_test();
+
+    #[cfg(not(feature = "test"))]
     let tracer = oltp_tracing_init();
 
     fn my_other_function() {
@@ -118,9 +146,6 @@ pub fn setup_tracing() -> anyhow::Result<()> {
         })
     }
 
-    tracer.clone().in_span("xyz", |_cx| {
-        my_other_function();
-    });
     let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
     tracing_subscriber::registry()
@@ -191,8 +216,6 @@ mod test {
     #[tokio::test]
     async fn test_stdout_tracer() {
         let tracer = oltp_tracing_test();
-        global::set_tracer_provider(tracer.clone());
-        let tracer = tracer.tracer("my_app");
 
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         let subscriber = Registry::default().with(telemetry);

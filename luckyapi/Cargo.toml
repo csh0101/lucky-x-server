@@ -12,11 +12,13 @@ description = "a good server named x"
 [features]
 default = []
 async = ["default"]
+test = []
 
 [dev-dependencies]
 criterion = { version = "0.4.0", features = ["async_futures", "async_tokio"] }
 tokio = { version = "1.36.0", features = ["full", "tracing"] }
 [dependencies]
+uuid = { version = "1.8.0", features = ["v4"] }
 opentelemetry = "0.22.0"
 opentelemetry_sdk = { version = "0.22.1", features = [
     "async-std",

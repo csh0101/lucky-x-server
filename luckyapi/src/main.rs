@@ -4,7 +4,7 @@ use anyhow::{Ok, Result};
 use tracing::instrument;
 use std::sync::Arc;
 use clap::{crate_authors,crate_description, Parser, Subcommand};
-use luckyapi::{handlers::zip_handler::FileBundle, *};
+use luckyapi::{handlers::zip_handler::{FileBundle, self}, *};
 use luckylib::oltp_config::setup_tracing;
 use axum::{handler::HandlerWithoutStateExt, routing::{get, post}, Router,
     extract::Extension,
@@ -41,6 +41,12 @@ enum Commands {
         from_dir :String,
         #[arg(short,long)]
         to_dir:String
+    },
+    Zip {
+        #[arg(short,long)]
+        from_dir :String,
+        // #[arg(short,long)]
+        // to_dir:String
     }
 }
 
@@ -83,7 +89,7 @@ async fn app_init() -> Result<()>{
         Commands::AdHoc => {
 
             let x = crate::handlers::zip_handler::build_zip(FileBundle
-                { path:"[\"/home/csh0101/lab/lucky-x-server/pictures\"]".to_string(), 
+                { path:  "[{\"filepath\": \"/Users/csh0101/lab/rust-playground/lucky-x-server/pictures\"}]".to_string(),
                 deltarget: Some(0), key: Some("123".to_string()), filename: "zip_test_file".to_string() }).unwrap();
             println!("output dir {}",x);
             Ok(())
@@ -94,6 +100,15 @@ async fn app_init() -> Result<()>{
              Ok(())
         }
         ,
+        Commands::Zip { from_dir } => {
+        if let Err(e)  =  async_build_zip(Arc::new(luckyapi::AppContext::init()), FileBundle { path: from_dir, key:Some( "123".to_string()),
+                deltarget: Some(0),
+                filename: "test_pictures".to_string(),
+        }).await{
+            println!("{}",e)  
+        }
+        Ok(())
+        },
     }
 
 }

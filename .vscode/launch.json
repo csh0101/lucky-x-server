@@ -39,7 +39,9 @@
                 }
             },
             "preLaunchTask": "rust: cargo build",
-            "args": ["launch-x-server","--port","8080"],
+            // "args": ["launch-x-server","--port","8080"],
+            "args":["zip","-f","[{\"filepath\": \"/Users/csh0101/lab/rust-playground/lucky-x-server/pictures\"}]"],
+            // "args":["ad-hoc"],
             "cwd": "${workspaceFolder}"
         },
         {

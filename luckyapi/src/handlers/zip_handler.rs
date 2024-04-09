@@ -5,7 +5,8 @@ use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
 use axum::debug_handler;
 use axum::extract::{Json, State};
-use fs_extra::dir::*;
+use clap::builder;
+use fs_extra::{dir::*, file};
 use md5;
 use opentelemetry::KeyValue;
 use regex;
@@ -17,18 +18,23 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str;
 use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc::Sender;
 use tokio::task;
+use tokio_util::bytes::buf;
 use tokio_util::compat::Compat;
 use tracing::field::debug;
 use tracing::instrument;
+use uuid::Uuid;
 use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::{self, ZipWriter};
 
 use crate::util::get_oss_instance;
-use crate::AppContext;
+use crate::{build, AppContext};
 use aliyun_oss_rust_sdk::request::RequestBuilder;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as _};
+use tokio::sync::Mutex;
+use tokio::sync::Semaphore;
 
 #[debug_handler]
 #[instrument(fields(custom_field = "zip archive"))]
@@ -129,64 +135,51 @@ pub async fn async_build_zip(
         }
     }?;
 
-    let archive_file_path = Path::new("./tmp")
-        .join("zipfile")
-        .join(format!("{}.zip", &output_name));
+    let archive_file_path = Path::new("./tmp").join("zipfile").join(format!(
+        "{}_{}.zip",
+        Uuid::new_v4(),
+        &output_name,
+    ));
 
     delete_file_if_exists(&archive_file_path)?;
 
-    let mut archive_file = tokio::fs::File::create(&archive_file_path).await?;
+    let archive_file = tokio::fs::File::create(&archive_file_path).await?;
 
     let mut zip_writer =
-        async_zip::tokio::write::ZipFileWriter::with_tokio(&mut archive_file);
+        async_zip::tokio::write::ZipFileWriter::with_tokio(archive_file);
 
     let mut content_total_size: u64 = 0;
+    let filepaths = filepaths(&bundle.path);
 
-    for filepath in filepaths(&bundle.path) {
+    for filepath in filepaths {
         let filepath: PathBuf = Path::new(&filepath).into();
-        let local_file_path =
-            Path::new("./tmp").join("zipfile").join(&filepath);
-        create_dir_all_if_not_exist(&local_file_path)?;
 
-        // todo 增加关键指标
-        match fs_extra::dir::copy(
-            &filepath,
-            &local_file_path,
-            &CopyOptions::new(),
-        ) {
-            Ok(_) => {
-                app_context
-                    .metric_context
-                    .zip_archive_context
-                    .file_copy_success
-                    .add(1u64, &[]);
-                Ok(())
-            }
-            Err(e) => {
-                app_context
-                    .metric_context
-                    .zip_archive_context
-                    .file_copy_failed
-                    .add(1u64, &[]);
-                Err(e)
-            }
-        }?;
-        let filepath = local_file_path;
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<(Vec<u8>, ZipEntryBuilder)>(2000);
 
-        match deal_dir_zip_archive(&filepath, &mut zip_writer).await {
-            Ok(x) => {
-                content_total_size += x;
-            }
-            Err(e) => {
-                app_context
-                    .metric_context
-                    .zip_archive_context
-                    .file_archive_failed
-                    .add(1u64, &[]);
-                return Err(AppError::Other(e));
-            }
-        };
+        let app_context_cloned = Arc::clone(&app_context);
+
+        tokio::spawn(async move {
+            match deal_dir_zip_archive(filepath, tx).await {
+                Ok(()) => {}
+                Err(e) => {
+                    app_context_cloned
+                        .metric_context
+                        .zip_archive_context
+                        .file_archive_failed
+                        .add(1u64, &[]);
+                }
+            };
+        });
+
+        while let Some((buffer, builder)) = rx.recv().await {
+            content_total_size += buffer.len() as u64;
+            // zip_writer.lock().write_entry_whole(zip_builder, &buffer).await?;
+            let _ = zip_writer.write_entry_whole(builder, &buffer).await?;
+        }
     }
+    zip_writer.close().await?;
+
     app_context
         .metric_context
         .zip_archive_context
@@ -202,31 +195,52 @@ pub async fn async_build_zip(
 }
 
 async fn deal_dir_zip_archive(
-    filepath: &PathBuf,
-    zip_writer: &mut ZipFileWriter<&mut tokio::fs::File>,
-) -> anyhow::Result<u64> {
-    let mut content_size: u64 = 0;
+    filepath: PathBuf,
+    tx: tokio::sync::mpsc::Sender<(Vec<u8>, ZipEntryBuilder)>,
+) -> anyhow::Result<()> {
     let entries = async_walk_dir(filepath.clone()).await?;
 
     let input_dir_str = filepath
         .as_os_str()
         .to_str()
-        .ok_or(anyhow!("Input path not valid UTF-8."))?;
+        .ok_or(anyhow!("Input path not valid UTF-8."))?
+        .to_string();
+
+    let semaphore = Arc::new(Semaphore::new(2000));
 
     for entry_path_buf in entries {
-        let entry_path = entry_path_buf.as_path();
-        let entry_str = entry_path
-            .as_os_str()
-            .to_str()
-            .ok_or(anyhow!("Directory file path not valid UTF-8."))?;
+        let semaphore_clone = semaphore.clone();
+        let tx = tx.clone();
 
-        if !entry_str.starts_with(input_dir_str) {
-            return Err(anyhow!("Directory file path does not start with base input directory path."));
-        }
-        let entry_str = &entry_str[input_dir_str.len() + 1..];
-        content_size += write_entry(entry_str, entry_path, zip_writer).await?;
+        let input_dir_str_clone = input_dir_str.clone();
+
+        tokio::spawn(async move {
+            let _permit = semaphore_clone.acquire().await?;
+            let entry_path = entry_path_buf.as_path();
+            let entry_str = entry_path
+                .as_os_str()
+                .to_str()
+                .ok_or(anyhow!("Directory file path not valid UTF-8."))?;
+
+            if !entry_str.starts_with(&input_dir_str_clone) {
+                return Err(anyhow!("Directory file path does not start with base input directory path."));
+            }
+
+            let entry_str = &entry_str[&input_dir_str_clone.len() + 1..];
+            let mut input_file =
+                tokio::fs::File::open(entry_path).await.unwrap();
+            let input_file_size = input_file.metadata().await?.len();
+            let mut buffer = Vec::with_capacity(input_file_size as usize);
+            input_file.read_to_end(&mut buffer).await?;
+            tx.send((
+                buffer,
+                ZipEntryBuilder::new(entry_str.into(), Compression::Stored),
+            ))
+            .await?;
+            Ok::<(), anyhow::Error>(())
+        });
     }
-    Ok(content_size)
+    Ok(())
 }
 
 async fn write_entry(
@@ -240,7 +254,7 @@ async fn write_entry(
     let mut buffer = Vec::with_capacity(input_file_size as usize);
     input_file.read_to_end(&mut buffer).await?;
 
-    let builder = ZipEntryBuilder::new(filename.into(), Compression::Deflate);
+    let builder = ZipEntryBuilder::new(filename.into(), Compression::Stored);
     // todo 流式写入的方式貌似不太work,局部文件头无效
     // writer.write_entry_stream(builder).await?;
     writer.write_entry_whole(builder, &buffer).await?;
