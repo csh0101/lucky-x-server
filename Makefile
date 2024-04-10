@@ -45,3 +45,7 @@ run-musl-async-server:
 
 # 伪目标 忽略这些名字的文件
 .PHONY: all build release run run-async clean check update
+
+# 使用hyperfine测试
+hyperfine:
+	@hyperfine --warmup 3 --cleanup 'rm -rf *.zip'  -L args '"[{\"filepath\": \"pictures\"}]"'  --runs '10' './target/release/luckyapi zip -f {args}'
