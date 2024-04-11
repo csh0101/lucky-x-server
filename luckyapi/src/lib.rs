@@ -4,8 +4,10 @@
 use shadow_rs::shadow;
 shadow!(build);
 pub mod common;
+pub mod db;
 pub mod error;
 pub mod handlers;
+pub mod models;
 
 pub mod util;
 pub use handlers::health_handler::health_check_handler;

@@ -222,11 +222,21 @@ mod test {
 
         tracing::subscriber::set_global_default(subscriber).expect("set global tracer failed");
 
-        // let tracer = global::tracer_provider().tracer("my_app");
+        let tracer = global::tracer_provider().tracer("my_app");
 
-        // tracer.in_span("xyz", |_cx| {
-        //     my_other_function();
-        // });
+        fn my_other_function() {
+            // call methods on the current span from
+            get_active_span(|span| {
+                span.add_event(
+                    "An event!".to_string(),
+                    vec![KeyValue::new("happened", true)],
+                );
+            })
+        }
+
+        tracer.in_span("xyz", |_cx| {
+            my_other_function();
+        });
 
         instrument_test("csh0101".to_string());
 
@@ -268,13 +278,14 @@ mod test {
             .install_batch(opentelemetry_sdk::runtime::Tokio)
             .unwrap();
 
-        tracer.in_span("doing_work", |cx| {
+        tracer.in_span("doing_work_test_e", |cx| {
             my_other_function();
         });
-        let mut span = tracer.start("doing_work");
+        let mut span = tracer.start("doing_work_test_f");
         my_other_function(); // 确保异步函数被等待
         span.end();
         println!("start sleep");
+        // global::shutdown_tracer_provider();
         tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
     }
 }
