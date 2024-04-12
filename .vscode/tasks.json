@@ -4,7 +4,8 @@
 		{
 			"type": "cargo",
 			"command": "build",
-			"args": ["--features","async","--features","luckylib/test"],
+			// "args": ["--features","async","--features","luckylib/test"],
+			"args": ["--features","async"],
 			"problemMatcher": [
 				"$rustc"
 			],

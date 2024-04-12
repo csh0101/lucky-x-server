@@ -1,6 +1,6 @@
 use crate::common::error::AppError;
 use crate::common::response::{build_success_response, AppJson, RespResult};
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Context, Error};
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
 use axum::debug_handler;
@@ -23,7 +23,7 @@ use tokio::task;
 use tokio_util::bytes::buf;
 use tokio_util::compat::Compat;
 use tracing::field::debug;
-use tracing::instrument;
+use tracing::{info, instrument};
 use uuid::Uuid;
 use walkdir::WalkDir;
 use zip::write::FileOptions;
@@ -37,15 +37,16 @@ use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 
 #[debug_handler]
-#[instrument(fields(custom_field = "zip archive"))]
+#[instrument(fields(custom_field = "zip archive"), skip(app_context))]
 pub async fn zipfile_bundle(
     State(app_context): State<Arc<AppContext>>,
     AppJson(file_bundle): AppJson<FileBundle>,
 ) -> Result<AppJson<RespResult<ZipFileBundleResult>>, AppError> {
     let output_name;
+    let mut file_full_path: String = "".to_string();
     #[cfg(feature = "async")]
     {
-        output_name =
+        (output_name, file_full_path) =
             async_build_zip(app_context.clone(), file_bundle.clone()).await?;
     }
 
@@ -58,7 +59,7 @@ pub async fn zipfile_bundle(
                 .await?;
     }
 
-    upload(app_context.clone(), &file_bundle.filename, output_name).await?;
+    upload(app_context.clone(), &output_name, file_full_path).await?;
 
     let resp = ZipFileBundleResult { success: true };
 
@@ -68,32 +69,39 @@ pub async fn zipfile_bundle(
 #[instrument(fields(custom_field = "upload oss"))]
 async fn upload(
     app_context: Arc<AppContext>,
-    filename: &str,
-    output_name: String,
+    output_name: &str,
+    file_full_path: String,
 ) -> anyhow::Result<()> {
-    let dir = get_dir(&filename);
+    let dir = get_dir(&output_name);
 
-    let oss_full_filepath = format!("{}/{}", dir, &filename);
+    let oss_full_filepath = format!("{}/{}", dir, &output_name);
 
     let oss = get_oss_instance().await;
 
     let builder = RequestBuilder::new();
     match oss
-        .put_object_from_file(output_name, oss_full_filepath, builder)
-        .await
+        .put_object_from_file(
+            oss_full_filepath.clone(),
+            file_full_path.clone(),
+            builder,
+        )
+        .await.with_context(|| format!("Failed to put_object_from_file, target_path: {} , local_file_path: {}",oss_full_filepath, file_full_path))
     {
-        Ok(()) => app_context
-            .metric_context
-            .zip_archive_context
-            .oss_upload_file_success
-            .add(1, &[]),
+        Ok(()) => {
+            info!("upload oss file {}", oss_full_filepath);
+            app_context
+                .metric_context
+                .zip_archive_context
+                .oss_upload_file_success
+                .add(1, &[]);
+        }
         Err(err) => {
             app_context
                 .metric_context
                 .zip_archive_context
                 .oss_upload_file_failed
                 .add(1, &[]);
-            return Err(anyhow::Error::new(err));
+            return Err(err);
         }
     };
     Ok(())
@@ -121,11 +129,11 @@ pub struct ZipFileBundleResult {
     success: bool,
 }
 
-#[instrument(fields(custom_field = "async build zip"))]
+#[instrument(fields(custom_field = "async build zip"), skip(app_context))]
 pub async fn async_build_zip(
     app_context: Arc<AppContext>,
     bundle: FileBundle,
-) -> anyhow::Result<String, AppError> {
+) -> anyhow::Result<(String, String), AppError> {
     // app_context.metric_context.zip_archive_context.file_archive_content_size.add();
     let output_name = {
         if let Some(key) = bundle.key {
@@ -135,11 +143,10 @@ pub async fn async_build_zip(
         }
     }?;
 
-    let archive_file_path = Path::new("./tmp").join("zipfile").join(format!(
-        "{}_{}.zip",
-        Uuid::new_v4(),
-        &output_name,
-    ));
+    let output_name = format!("{}_{}.zip", Uuid::new_v4(), &output_name,);
+
+    let archive_file_path =
+        Path::new("./tmp").join("zipfile").join(&output_name);
 
     delete_file_if_exists(&archive_file_path)?;
 
@@ -149,34 +156,31 @@ pub async fn async_build_zip(
         async_zip::tokio::write::ZipFileWriter::with_tokio(archive_file);
 
     let mut content_total_size: u64 = 0;
-    let filepaths = filepaths(&bundle.path);
 
-    for filepath in filepaths {
-        let filepath: PathBuf = Path::new(&filepath).into();
+    let filepath: PathBuf = Path::new(&bundle.path).into();
 
-        let (tx, mut rx) =
-            tokio::sync::mpsc::channel::<(Vec<u8>, ZipEntryBuilder)>(2000);
+    let (tx, mut rx) =
+        tokio::sync::mpsc::channel::<(Vec<u8>, ZipEntryBuilder)>(2000);
 
-        let app_context_cloned = Arc::clone(&app_context);
+    let app_context_cloned = Arc::clone(&app_context);
 
-        tokio::spawn(async move {
-            match deal_dir_zip_archive(filepath, tx).await {
-                Ok(()) => {}
-                Err(e) => {
-                    app_context_cloned
-                        .metric_context
-                        .zip_archive_context
-                        .file_archive_failed
-                        .add(1u64, &[]);
-                }
-            };
-        });
+    tokio::spawn(async move {
+        match deal_dir_zip_archive(filepath, tx).await {
+            Ok(()) => {}
+            Err(e) => {
+                app_context_cloned
+                    .metric_context
+                    .zip_archive_context
+                    .file_archive_failed
+                    .add(1u64, &[]);
+            }
+        };
+    });
 
-        while let Some((buffer, builder)) = rx.recv().await {
-            content_total_size += buffer.len() as u64;
-            // zip_writer.lock().write_entry_whole(zip_builder, &buffer).await?;
-            let _ = zip_writer.write_entry_whole(builder, &buffer).await?;
-        }
+    while let Some((buffer, builder)) = rx.recv().await {
+        content_total_size += buffer.len() as u64;
+        // zip_writer.lock().write_entry_whole(zip_builder, &buffer).await?;
+        let _ = zip_writer.write_entry_whole(builder, &buffer).await?;
     }
     zip_writer.close().await?;
 
@@ -191,7 +195,7 @@ pub async fn async_build_zip(
         .file_archive_success
         .add(1u64, &[]);
 
-    Ok(output_name)
+    Ok((output_name, archive_file_path.to_string_lossy().to_string()))
 }
 
 async fn deal_dir_zip_archive(
@@ -228,7 +232,12 @@ async fn deal_dir_zip_archive(
 
             let entry_str = &entry_str[&input_dir_str_clone.len() + 1..];
             let mut input_file =
-                tokio::fs::File::open(entry_path).await.unwrap();
+                tokio::fs::File::open(entry_path).await.with_context(|| {
+                    format!(
+                        "failed to open file, path: {}",
+                        entry_path.to_string_lossy()
+                    )
+                })?;
             let input_file_size = input_file.metadata().await?.len();
             let mut buffer = Vec::with_capacity(input_file_size as usize);
             input_file.read_to_end(&mut buffer).await?;

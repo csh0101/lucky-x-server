@@ -10,6 +10,7 @@ use axum::{handler::HandlerWithoutStateExt, routing::{get, post}, Router,
     extract::Extension,
 };
 use tokio::runtime::Builder;
+use once_cell::sync::Lazy;
 // use lucky_x_api::error::storage_error::StorageError;
 
 
@@ -137,18 +138,6 @@ async fn register_router(port: String) -> Result<()> {
     axum::serve(listener,app).await.unwrap();
 
     
-    // let rt = runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-    // rt.block_on(launch(port))
-    Ok(())
-}
-
-#[allow(dead_code)]
-async fn launch(port: String) -> Result<()> {
-    println!("{}", port);
-    tracing::info!("csh0101");
-    tracing::debug!("csh0101");
-    let x =  std::env::var("RUST_LOG").unwrap();
-    tracing::info!("the rust_log is {}",x);
     Ok(())
 }
 

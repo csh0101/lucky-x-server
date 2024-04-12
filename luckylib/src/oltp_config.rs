@@ -245,7 +245,13 @@ mod test {
 
     #[instrument]
     fn instrument_test(xyz: String) {
-        info!("test instrument")
+        info!("test instrument");
+
+        do_something_test("xyz".to_string());
+    }
+
+    fn do_something_test(xyz: String) {
+        info!("{}", xyz)
     }
 
     #[tokio::test]

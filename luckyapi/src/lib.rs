@@ -9,6 +9,7 @@ pub mod error;
 pub mod handlers;
 pub mod models;
 
+use once_cell::sync::Lazy;
 pub mod util;
 pub use handlers::health_handler::health_check_handler;
 pub use handlers::zip_handler::async_build_zip;
@@ -38,7 +39,7 @@ impl AppContext {
  */
 
 #[derive(Debug)]
-struct MetricContext {
+pub struct MetricContext {
     zip_archive_context: ZipArchiveMetricContext,
 }
 
@@ -55,14 +56,12 @@ struct ZipArchiveMetricContext {
 }
 
 impl MetricContext {
-    fn init() -> Self {
-        MetricContext {
-            zip_archive_context: registry_zip_achrive_metrics().unwrap(),
-        }
+    pub fn init() -> Self {
+        MetricContext { zip_archive_context: registry_zip_achrive_metrics() }
     }
 }
 
-fn registry_zip_achrive_metrics() -> anyhow::Result<ZipArchiveMetricContext> {
+fn registry_zip_achrive_metrics() -> ZipArchiveMetricContext {
     let meter = luckylib::OLTP_METER.meter("luckyapi");
 
     let file_req_access = meter
@@ -113,7 +112,7 @@ fn registry_zip_achrive_metrics() -> anyhow::Result<ZipArchiveMetricContext> {
         .with_unit(Unit::new("times"))
         .init();
 
-    Ok(ZipArchiveMetricContext {
+    ZipArchiveMetricContext {
         file_req_access,
         file_copy_success,
         file_copy_failed,
@@ -122,5 +121,5 @@ fn registry_zip_achrive_metrics() -> anyhow::Result<ZipArchiveMetricContext> {
         file_archive_content_size,
         oss_upload_file_success,
         oss_upload_file_failed,
-    })
+    }
 }

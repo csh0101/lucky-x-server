@@ -1,4 +1,5 @@
 use aliyun_oss_rust_sdk::oss::OSS;
+use env_file_reader::read_file;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -6,7 +7,13 @@ static OSS_INSTANCE: OnceCell<Arc<OSS>> = OnceCell::const_new();
 
 pub async fn get_oss_instance() -> Arc<OSS> {
     OSS_INSTANCE
-        .get_or_init(|| async { Arc::new(OSS::from_env()) })
+        .get_or_init(|| async {
+            let env_variables = read_file(".env").unwrap();
+            for (k, v) in env_variables.iter() {
+                std::env::set_var(k, v)
+            }
+            Arc::new(OSS::from_env())
+        })
         .await
         .clone()
 }
