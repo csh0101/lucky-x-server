@@ -9,6 +9,12 @@ services:
       - ./otel-collector-config-minimal.yaml:/etc/otelcol-contrib/config.yaml
     networks:
       - observe
+  mysql-server:
+    ports:
+      - 3306:3306
+    image: mysql/mysql-server:5.7
+    networks:
+      - observe
   # jaeger:
   #   image: jaegertracing/all-in-one:${JAEGER_VERSION:-latest}
   #   ports:

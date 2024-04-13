@@ -1,1 +1,1 @@
-mod sqlx_dao;
+pub mod sqlx_dao;

@@ -1,3 +1,5 @@
+use std::num::ParseIntError;
+
 use aliyun_oss_rust_sdk::{error::OssError, oss::OSS};
 use axum::{
     extract::rejection::JsonRejection, http::StatusCode, response::IntoResponse,
@@ -86,6 +88,12 @@ impl From<fs_extra::error::Error> for AppError {
 
 impl From<async_zip::error::ZipError> for AppError {
     fn from(err: async_zip::error::ZipError) -> Self {
+        AppError::Other(anyhow::Error::new(err))
+    }
+}
+
+impl From<ParseIntError> for AppError {
+    fn from(err: ParseIntError) -> Self {
         AppError::Other(anyhow::Error::new(err))
     }
 }

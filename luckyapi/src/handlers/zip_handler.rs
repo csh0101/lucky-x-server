@@ -1,5 +1,6 @@
 use crate::common::error::AppError;
 use crate::common::response::{build_success_response, AppJson, RespResult};
+use crate::models::archive::{Process, ProcessStatus};
 use anyhow::{anyhow, Context, Error};
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
@@ -36,32 +37,77 @@ use std::sync::{Arc, Mutex as _};
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 
+use crate::db::sqlx_dao::{self, add_archive_process, update_archive_process};
+
 #[debug_handler]
 #[instrument(fields(custom_field = "zip archive"), skip(app_context))]
 pub async fn zipfile_bundle(
     State(app_context): State<Arc<AppContext>>,
     AppJson(file_bundle): AppJson<FileBundle>,
 ) -> Result<AppJson<RespResult<ZipFileBundleResult>>, AppError> {
-    let output_name;
-    let mut file_full_path: String = "".to_string();
-    #[cfg(feature = "async")]
-    {
-        (output_name, file_full_path) =
-            async_build_zip(app_context.clone(), file_bundle.clone()).await?;
-    }
-
-    // output_name = async_build_zip(app_context, file_bundle.clone()).await?;
-
-    #[cfg(not(feature = "async"))]
-    {
-        output_name =
-            std_zipfile_bundle(app_context.clone(), file_bundle.clone())
-                .await?;
-    }
-
-    upload(app_context.clone(), &output_name, file_full_path).await?;
-
-    let resp = ZipFileBundleResult { success: true };
+    let mut output_name = {
+        if let Some(key) = file_bundle.key {
+            output_filename(&file_bundle.filename, &key)
+        } else {
+            output_filename(&file_bundle.filename, "")
+        }
+    }?;
+    output_name = format!("{}_{}.zip", Uuid::new_v4(), &output_name,);
+    let path_clone = file_bundle.path.clone();
+    let process_id = add_archive_process(Process::new_pending_process(
+        file_bundle.path,
+        output_name.clone(),
+    ))
+    .await?;
+    tokio::spawn(async move {
+        // #[cfg(feature = "async")]
+        // {
+        match async_build_zip(
+            app_context.clone(),
+            path_clone,
+            output_name.clone(),
+        )
+        .await
+        {
+            Ok((output_name, file_full_path)) => {
+                if let Err(e) =
+                    upload(app_context.clone(), &output_name, file_full_path)
+                        .await
+                {
+                    tracing::info!("call upload function failed {}", e)
+                }
+            }
+            Err(e) => {
+                tracing::error!("async_build_zip error: {}", e);
+                match update_archive_process(
+                    ProcessStatus::Failed,
+                    process_id as i64,
+                )
+                .await
+                {
+                    Ok(id) => {
+                        tracing::debug!(
+                            "update_archive_process success: {}",
+                            id
+                        )
+                    }
+                    Err(e) => {
+                        tracing::debug!("update_archive_process failed: {}", e)
+                    }
+                }
+            }
+        };
+        // }
+        // output_name = async_build_zip(app_context, file_bundle.clone()).await?;
+        // #[cfg(not(feature = "async"))]
+        // {
+        //     output_name =
+        //         std_zipfile_bundle(app_context.clone(), file_bundle.clone())
+        //             .await?;
+        // }
+    });
+    let resp =
+        ZipFileBundleResult { success: true, process_id, ..Default::default() };
 
     Ok(AppJson(build_success_response(resp)))
 }
@@ -124,26 +170,21 @@ pub struct FileBundle {
     pub filename: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct ZipFileBundleResult {
     success: bool,
+    process_id: u64,
+    oss_url: String,
+    status: String,
 }
 
 #[instrument(fields(custom_field = "async build zip"), skip(app_context))]
 pub async fn async_build_zip(
     app_context: Arc<AppContext>,
-    bundle: FileBundle,
+    dir_path: String,
+    output_name: String,
 ) -> anyhow::Result<(String, String), AppError> {
     // app_context.metric_context.zip_archive_context.file_archive_content_size.add();
-    let output_name = {
-        if let Some(key) = bundle.key {
-            output_filename(&bundle.filename, &key)
-        } else {
-            output_filename(&bundle.filename, "")
-        }
-    }?;
-
-    let output_name = format!("{}_{}.zip", Uuid::new_v4(), &output_name,);
 
     let archive_file_path =
         Path::new("./tmp").join("zipfile").join(&output_name);
@@ -157,7 +198,7 @@ pub async fn async_build_zip(
 
     let mut content_total_size: u64 = 0;
 
-    let filepath: PathBuf = Path::new(&bundle.path).into();
+    let filepath: PathBuf = Path::new(&dir_path).into();
 
     let (tx, mut rx) =
         tokio::sync::mpsc::channel::<(Vec<u8>, ZipEntryBuilder)>(2000);
@@ -449,6 +490,21 @@ pub fn walkdir_sync_v2(dir: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
     }
 
     Ok(files)
+}
+
+pub async fn archive_procecss_status(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<AppJson<RespResult<ZipFileBundleResult>>, AppError> {
+    let process_id = id.parse::<i64>()?;
+    let process = sqlx_dao::query_process_status_by_id(process_id).await?;
+
+    Ok(AppJson(build_success_response(ZipFileBundleResult {
+        success: true,
+        process_id: process_id as u64,
+        oss_url: process.oss_url.unwrap_or_default(),
+        status: process.status.into(),
+    })))
+    // ...
 }
 
 mod test {

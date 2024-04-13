@@ -10,7 +10,6 @@ use axum::{handler::HandlerWithoutStateExt, routing::{get, post}, Router,
     extract::Extension,
 };
 use tokio::runtime::Builder;
-use once_cell::sync::Lazy;
 // use lucky_x_api::error::storage_error::StorageError;
 
 
@@ -102,10 +101,8 @@ async fn app_init() -> Result<()>{
         }
         ,
         Commands::Zip { from_dir } => {
-        if let Err(e)  =  async_build_zip(Arc::new(luckyapi::AppContext::init()), FileBundle { path: from_dir, key:Some( "123".to_string()),
-                deltarget: Some(0),
-                filename: "test_pictures".to_string(),
-        }).await{
+        if let Err(e)  =  async_build_zip(Arc::new(luckyapi::AppContext::init()), 
+        from_dir,"1.zip".to_string()).await{
             println!("{}",e)  
         }
         Ok(())
@@ -130,6 +127,7 @@ async fn register_router(port: String) -> Result<()> {
     let app = Router::new()
     .route("/api/v1/health", get(luckyapi::health_check_handler))
     .route("/api/v1/zipfile_bundle", post(luckyapi::zipfile_bundle))
+    .route("/api/v1/process/:process_id", get(luckyapi::archive_procecss_status))
     .with_state(Arc::new(luckyapi::AppContext::init()));
     // server listener
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}",port)).await.unwrap();
@@ -138,6 +136,18 @@ async fn register_router(port: String) -> Result<()> {
     axum::serve(listener,app).await.unwrap();
 
     
+    // let rt = runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    // rt.block_on(launch(port))
+    Ok(())
+}
+
+#[allow(dead_code)]
+async fn launch(port: String) -> Result<()> {
+    println!("{}", port);
+    tracing::info!("csh0101");
+    tracing::debug!("csh0101");
+    let x =  std::env::var("RUST_LOG").unwrap();
+    tracing::info!("the rust_log is {}",x);
     Ok(())
 }
 

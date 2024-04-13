@@ -51,8 +51,18 @@ aliyun-oss-rust-sdk = { version = "0.2.1", features = ["debug-print"] }
 lazy_static = "1.4.0"
 fs_extra = "1.3.0"
 env-file-reader = "0.3.0"
-sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "mysql"] }
+sqlx = { version = "0.7", features = [
+    "runtime-tokio",
+    "mysql",
+    "chrono",
+    "time",
+] }
 sqlx-macros = "0.7.4"
+chrono = { version = "0.4.37", features = ["serde"] }
+time = { version = "0.3.22", default-features = false, features = [
+    "formatting",
+    "macros",
+] }
 [build-dependencies]
 shadow-rs = { version = "0.27.1" }
 

@@ -1,1 +1,1 @@
-mod archive;
+pub mod archive;
