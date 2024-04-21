@@ -39,6 +39,7 @@ thiserror = { version = "1.0.58" }
 shadow-rs = { version = "0.27.1" }
 luckylib = { path = "../luckylib" }
 tracing = "0.1.40"
+tun-tap = "0.1.4"
 zip = "0.6.0"
 gjson = "0.8"
 walkdir = "2.3"
@@ -63,6 +64,7 @@ time = { version = "0.3.22", default-features = false, features = [
     "formatting",
     "macros",
 ] }
+etherparse = "0.14.3"
 [build-dependencies]
 shadow-rs = { version = "0.27.1" }
 

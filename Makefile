@@ -49,3 +49,9 @@ run-musl-async-server:
 # 使用hyperfine测试
 hyperfine:
 	@hyperfine --warmup 3 --cleanup 'rm -rf *.zip'  -L args '"[{\"filepath\": \"pictures\"}]"'  --runs '10' './target/release/luckyapi zip -f {args}'
+
+tun:
+	@cargo build
+	@sudo setcap  cap_net_admin=eip target/debug/luckyapi
+	@sudo ip link set up dev tun0 
+	@target/debug/luckyapi tun
